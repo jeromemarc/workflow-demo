@@ -1,8 +1,6 @@
 ---
 # tasks file for app
-
-# Remove Vault due to issue in Tower 3.1 Beta
-#- include_vars: vars/vault.yml
+- include_vars: vars/vault.yml
 
 - name: Check for OS support
   fail:
