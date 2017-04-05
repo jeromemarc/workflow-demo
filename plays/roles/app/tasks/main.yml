@@ -1,0 +1,29 @@
+---
+# tasks file for app
+
+# Remove Vault due to issue in Tower 3.1 Beta
+#- include_vars: vars/vault.yml
+
+- name: Check for OS support
+  fail:
+    msg: "OS is not supported"
+  when: ansible_os_family != 'RedHat'
+
+#- block:
+#    - set_fact:
+#        deploy: "{{ lookup('pipe', 'curl -m2 -s {{ app_remote_web }}/{{ inventory_hostname }}') }}"
+#  rescue:
+#    - set_fact:
+#        deploy: True
+
+- include: deploy.yml
+#  when: deploy
+  register: deployed
+
+- fail:
+    msg: "Deployment to {{ inventory_hostname }} was not permitted by policy"
+  when: deployed|skipped
+  with_dict: "{{ deployed | default({}) }}"
+
+#- include: add-elb.yml
+#  when: deploy

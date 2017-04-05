@@ -1,0 +1,38 @@
+---
+# tasks file for yum
+# vim: set ft=ansible:
+
+- block:
+  - name: Ensure fastestmirror is disabled
+    lineinfile:
+      dest: /etc/yum/pluginconf.d/fastestmirror.conf
+      regexp: '^enabled='
+      line: 'enabled=0'
+      state: present
+
+  - name: Manage base repos
+    template:
+      src: CentOS-Base.repo.j2
+      dest: /etc/yum.repos.d/CentOS-Base.repo
+      owner: root
+      group: root
+      mode: 0644
+
+  when: ansible_distribution == 'CentOS'
+
+- name: Put EPEL GPG key in place
+  copy:
+    src: RPM-GPG-KEY-EPEL-7
+    dest: /etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL-7
+    owner: root
+    group: root
+    mode: 0644
+
+- name: Enable extra Yum repositories
+  template:
+    src: template.repo.j2
+    dest: "/etc/yum.repos.d/{{ item.label }}.repo"
+    owner: root
+    group: root
+    mode: 0644
+  with_items: "{{ yum_repos | default([]) }}"

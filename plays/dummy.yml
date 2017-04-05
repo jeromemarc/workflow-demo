@@ -1,0 +1,8 @@
+---
+- name: Ping
+  hosts: ansible-tower
+  connection: local
+  gather_facts: no
+  tasks:
+    - name: Ping host
+      ping:

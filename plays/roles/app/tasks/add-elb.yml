@@ -1,0 +1,15 @@
+---
+# Add app to ELB
+
+  - name: Register instance to AWS ELB (US-East-1)
+    local_action:
+      module: ec2_elb
+      ec2_region: us-east-1
+      instance_id: "{{ ec2_id }}"  # instance_id from Ansible Facts
+      ec2_elbs: "cicd-demo"
+      state: present
+      wait: yes
+      wait_timeout: 60
+    become: false
+    ignore_errors: yes
+

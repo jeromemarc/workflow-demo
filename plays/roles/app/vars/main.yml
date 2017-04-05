@@ -1,0 +1,3 @@
+---
+app_jenkins_user: "{{ vault_app_jenkins_user }}"
+app_jenkins_pass: "{{ vault_app_jenkins_pass }}"

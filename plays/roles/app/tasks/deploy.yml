@@ -1,0 +1,80 @@
+---
+# deploy app
+  - name: Set selinux permissive (disgraceful hack)
+    selinux:
+      policy: targeted
+      state: permissive
+
+  - name: Ensure NGINX repo is present
+    yum:
+      name: http://nginx.org/packages/centos/7/noarch/RPMS/nginx-release-centos-7-0.el7.ngx.noarch.rpm
+
+  - name: Ensure packages are installed
+    yum:
+      name: "{{ item }}"
+      state: present
+    with_items:
+      - python-lxml
+      - nginx
+
+  - name: Ensure dir for app path exists
+    file:
+      path: "{{ app_path }}"
+      state: directory
+      owner: root
+      group: root
+
+  - name: Download application artifact
+    get_url:
+      url: http://{{ app_jenkins_host }}:{{ app_jenkins_port }}/job/{{ app_jenkins_job }}/lastSuccessfulBuild/artifact/dist/app.tgz
+      url_username: "{{ app_jenkins_user }}"
+      url_password: "{{ app_jenkins_pass }}"
+      force_basic_auth: yes
+      dest: /var/tmp
+    no_log: true
+
+  - name: Unarchive artifact
+    unarchive:
+      copy: false
+      dest: "{{ app_path }}"
+      src: /var/tmp/app.tgz
+      owner: root
+      group: root
+
+#- name: Set up service definition
+#  template:
+#    src: webapp.service.j2
+#    dest: /etc/systemd/system/webapp.service
+#    owner: root
+#    group: root
+#    mode: 0644
+#  notify:
+#    - restart webapp service
+
+#- name: Ensure the app service is running
+#  service:
+#    name: webapp
+#    state: started
+#    enabled: yes
+
+  - name: Start webapp nginx
+    shell: nohup /srv/web_app/support/bin/python /srv/web_app/run_prod.py &
+    
+  - name: Configure nginx to front the app
+    template:
+      src: nginx.conf.j2
+      dest: /etc/nginx/nginx.conf
+      owner: root
+      group: root
+      mode: 0644
+
+  - name: Ensure nginx is running
+    service:
+      name: nginx
+      state: started
+      enabled: yes
+
+  - name: Display machine IP
+    debug:
+      msg: "{{ ansible_default_ipv4.address }}"
+

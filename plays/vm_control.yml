@@ -1,0 +1,37 @@
+---
+# vim: set ft=ansible et ts=2 sw=2:
+#
+# Control the state of a VM - poweredon, poweredoff or absent
+# (i.e. delete it)
+
+- hosts: vmcreate
+  gather_facts: false
+  connection: local
+  vars:
+    state: poweredon
+  tasks:
+    - name: Check for required variables
+      fail: msg="Must pass name to -e"
+      when: name is not defined
+
+    - name: Check for vSphere access parameters
+      fail: msg="Must set vcenter_user and vcenter_pass in a Vault"
+      when: (vcenter_user is not defined) or (vcenter_pass is not defined)
+
+    - name: Shutdown VM first if delete required
+      vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_user }}"
+        password: "{{ vcenter_pass }}"
+        name: "{{ name }}"
+        state: "poweredoff"
+      when: state == "absent"
+
+    - name: Set VM to desired state
+      vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_user }}"
+        password: "{{ vcenter_pass }}"
+        name: "{{ name }}"
+        state: "{{ state }}"
+

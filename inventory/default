@@ -1,0 +1,5 @@
+[vmcreate:children]
+linuxpython
+
+[linuxpython]
+linux ansible_connection=local ansible_python_interpreter=/home/vagrant/pip/bin/python
