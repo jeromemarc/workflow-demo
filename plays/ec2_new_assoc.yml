@@ -47,7 +47,7 @@
 
     - name: Lookup instance href
       uri:
-        url: "{{ manageiq.api_url }}/api/vms?filter[]=name={{ ec2[0].id }}&expand=resources"
+        url: "{{ manageiq.api_url }}/api/vms?filter[]=name={{ ec2['item'].id }}&expand=resources"
         method: GET
         body:
           action: refresh
