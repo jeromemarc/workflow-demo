@@ -9,11 +9,14 @@
     ami:      ami-81cf0c97 
     keypair:  "{{ ec2_keypair_name | default('you need to define this') }}"
     set_dns:  False
-    count:    1
+    count:    2
     tags:
       env:  "{{ tags_env  | default('prod') }}"
       type: "{{ tags_type | default('app') }}"
     wait_for_ssh: False
+    provider_id: "{{ provider_id | default('20000000000001') }}"
+    max_retries: 9
+    retry_interval: 20
 
   tasks:
     - name: Launch instance
@@ -45,10 +48,14 @@
         msg: "{{ item.id }} {{ item.public_ip }}"
       with_items: "{{ ec2.instances }}"
 
-    - name: Lookup instance href
+    - name: Set the Provider URL
+      set_fact:
+        provider_url: "{{ manageiq.api_url }}/api/providers/{{ provider_id }}"
+
+    - name: Refresh Amazon EC2 provider in CloudForms
       uri:
-        url: "{{ manageiq.api_url }}/api/vms?filter[]=name={{ ec2['item'].id }}&expand=resources"
-        method: GET
+        url: "{{ provider_url }}"
+        method: POST
         body:
           action: refresh
         body_format: json
@@ -59,30 +66,55 @@
         status_code: 200
       register: output
 
-    - debug: var=output.json.resources[0].id
+    - name: Set the task href
+      set_fact:
+        task_url: "{{ output.json.task_href}}"
 
-    - debug: var=manageiq.api_url
-    - debug: var=manageiq.api_token
-    - debug: var=manageiq.service
-    
+    - name: Wait for the provider refresh to end
+      uri:
+        url: "{{ task_url }}"
+        method: GET
+        validate_certs: False
+        headers:
+          X-Auth-Token: "{{ manageiq.api_token }}"
+          Content-Type: "application/json"
+        status_code: 200
+      register: task_result
+      until: task_result.json.state == 'Finished' or task_result.json.status == 'Error'
+      failed_when: task_result.json.status == 'Error'
+      retries: "{{max_retries}}"
+      delay: "{{retry_interval}}"
+
+    - name: Lookup instances href
+      uri:
+        url: "{{ manageiq.api_url }}/api/vms?filter[]=name={{ item.id }}&expand=resources"
+        method: GET
+        body:
+          action: refresh
+        body_format: json
+        validate_certs: False
+        headers:
+          X-Auth-Token: "{{ manageiq.api_token }}"
+          Content-Type: "application/json"
+        status_code: 200
+      register: output
+      with_items: "{{ ec2.instances }}"
+
     - name: Set the Service URL
       set_fact:
         svc_url: "/api/{{ manageiq.service }}"
 
-    - name: Set the VM URL
+    - name: Initialize an empty list for vms
       set_fact:
-        vm_url: "/api/vms/{{ output.json.resources[0].id }}"
+        vms: []
 
-    - debug: var=svc_url
-
-    - name: Create an array of vms
+    - name: Append resource href to vms list
       set_fact:
-        vms: "{{ vms|default([]) + [ { 'href': svc_url, 'resource':  { 'href': item } } ] }}"
-      with_items:
-        - "{{ vm_url }}"
+        vms: "{{ vms }} + [ { 'href': svc_url, 'resource': { 'href': '/api/vms/{{ item.json.resources[0].id }}' } } ]"
+      with_items: "{{ output.results }}"
 
     - debug: var=vms
-
+    
     - name: Register vms with the service
       uri:
         url: "{{ manageiq.api_url }}/api/services"
@@ -90,7 +122,7 @@
         body_format: json
         body:
           action: add_resource
-          resources : "{{ vms }}"
+          resources: "{{ vms }}"
         validate_certs: False
         headers:
           X-Auth-Token: "{{ manageiq.api_token }}"
@@ -103,3 +135,4 @@
     - name: Check if the VM was successfully attached to service
       fail: msg="{{output.json.results[0].message}}"
       when: output.json.results[0].success == false
+      
