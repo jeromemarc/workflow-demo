@@ -1,5 +1,7 @@
 ---
 - hosts: localhost
+  connection: local
+  become: False
   tasks:
   - name: Add host to ELB
     local_action:
