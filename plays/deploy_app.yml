@@ -1,0 +1,8 @@
+---
+- name: Deploy web application
+  hosts: "{{ hosts }}"
+  user: "{{ user }}"
+  become: true
+
+  roles:
+    - { role: app }
