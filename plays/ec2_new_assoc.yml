@@ -1,0 +1,105 @@
+---
+- name: Create new EC2 instances
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    region:   us-east-1
+    ami:      ami-81cf0c97 
+    keypair:  "{{ ec2_keypair_name | default('you need to define this') }}"
+    set_dns:  False
+    count:    1
+    tags:
+      env:  "{{ tags_env  | default('prod') }}"
+      type: "{{ tags_type | default('app') }}"
+    wait_for_ssh: False
+
+  tasks:
+    - name: Launch instance
+      local_action:
+        module: ec2
+        keypair: "{{ keypair }}"
+        instance_type: "{{ type | default('t2.micro') }}"
+        vpc_subnet_id: "subnet-{{ vpc_subnet | default('d931e1e5') }}"
+        image: "{{ ami }}"
+        region: "{{ region }}"
+        count: "{{ count }}"
+        wait: yes
+        instance_tags: "{{ tags }}"
+#        user_data: "{{ lookup('file', '../scripts/ec2_bootstrap.sh') }}"
+        assign_public_ip: "{{ assign_eip | default(true) }}"
+      register: ec2
+
+    - name: Wait for SSH to come up
+      wait_for:
+        host: "{{ item.public_dns_name }}"
+        port: 22
+        delay: 60
+        timeout: 320
+        state: started
+      with_items: "{{ ec2.instances }}"
+
+    - name: Instance info
+      debug:
+        msg: "{{ item.id }} {{ item.public_ip }}"
+      with_items: "{{ ec2.instances }}"
+
+    - name: Lookup instance href
+      uri:
+        url: "{{ manageiq.api_url }}/api/vms?filter[]=name={{ ec2.id }}&expand=resources"
+        method: GET
+        body:
+          action: refresh
+        body_format: json
+        validate_certs: False
+        headers:
+          X-Auth-Token: "{{ manageiq.api_token }}"
+          Content-Type: "application/json"
+        status_code: 200
+      register: output
+
+    - debug: var=output.json.resources[0].id
+
+    - debug: var=manageiq.api_url
+    - debug: var=manageiq.api_token
+    - debug: var=manageiq.service
+    
+    - name: Set the Service URL
+      set_fact:
+        svc_url: "/api/{{ manageiq.service }}"
+
+    - name: Set the VM URL
+      set_fact:
+        vm_url: "/api/vms/{{ output.json.resources[0].id }}"
+
+    - debug: var=svc_url
+
+    - name: Create an array of vms
+      set_fact:
+        vms: "{{ vms|default([]) + [ { 'href': svc_url, 'resource':  { 'href': item } } ] }}"
+      with_items:
+        - "{{ vm_url }}"
+
+    - debug: var=vms
+
+    - name: Register vms with the service
+      uri:
+        url: "{{ manageiq.api_url }}/api/services"
+        method: POST
+        body_format: json
+        body:
+          action: add_resource
+          resources : "{{ vms }}"
+        validate_certs: False
+        headers:
+          X-Auth-Token: "{{ manageiq.api_token }}"
+          Content-Type: "application/json"
+        status_code: 200
+      register: output
+
+    - debug: var=output.json.results[0].success
+
+    - name: Check if the VM was successfully attached to service
+      fail: msg="{{output.json.results[0].message}}"
+      when: output.json.results[0].success == false
