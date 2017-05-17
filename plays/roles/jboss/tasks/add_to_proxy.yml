@@ -1,0 +1,43 @@
+---
+# Add node to AWS-ELB
+- hosts: cloudforms
+  remote_user: ec2-user
+  become: true
+  tasks:
+  - name: Register instance to AWS ELB (US-East-1)
+    when: cloudforms.vendor == "amazon"
+    local_action:
+      module: ec2_elb
+      ec2_region: us-east-1
+      instance_id: "{{ cloudforms['uid_ems'] }}"  # instance_id from Ansible Facts
+      ec2_elbs: "ticketmonster"
+      state: present
+      wait: yes
+      wait_timeout: 60
+    become: false
+    ignore_errors: yes
+
+  - name: Register instance to AWS ELB (US-West-2)
+    when: cloudforms.vendor == "amazon"
+    local_action:
+      module: ec2_elb
+      ec2_region: us-west-2
+      instance_id: "{{ cloudforms['uid_ems'] }}"  # instance_id from Ansible Facts
+      ec2_elbs: "ticketmonster"
+      state: present
+      wait: yes
+      wait_timeout: 60
+    become: false
+    ignore_errors: yes
+
+
+  - name: Add host {{ inventory_hostname }} to HAProxy
+    when: cloudforms.vendor != "amazon"
+    lineinfile: dest=/etc/haproxy/haproxy.cfg 
+                line='    server  {{ inventory_hostname }} {{ ansible_ssh_host }}:8080 check'
+    delegate_to: rhel7-haproxy-mbu
+
+  - name: Restart HAProxy
+    when: cloudforms.vendor != "amazon"
+    command: systemctl restart haproxy.service
+    delegate_to: rhel7-haproxy-mbu

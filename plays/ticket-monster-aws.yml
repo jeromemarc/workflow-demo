@@ -1,0 +1,235 @@
+---
+- name: Create new EC2 instances
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    region:   us-east-1
+    ami:      ami-81cf0c97 
+    keypair:  "{{ ec2_keypair_name | default('aws-jmarc') }}"
+    set_dns:  False
+    count:    2
+    tags_db:
+      env:  "{{ tags_env  | default('prod') }}"
+      type: "{{ tags_type | default('db') }}"
+    tags_app:
+      env:  "{{ tags_env  | default('prod') }}"
+      type: "{{ tags_type | default('app') }}"
+    wait_for_ssh: False
+    provider_id: 20000000000001
+    max_retries: 9 
+    retry_interval: 20
+
+  tasks:
+    - name: Launch DB instance
+      local_action:
+        module: ec2
+        keypair: "{{ keypair }}"
+        instance_type: "{{ type | default('t2.micro') }}"
+        vpc_subnet_id: "subnet-{{ vpc_subnet | default('d931e1e5') }}"
+        image: "{{ ami }}"
+        region: "{{ region }}"
+        count: 1
+        wait: yes
+        instance_tags: "{{ tags_db }}"
+        assign_public_ip: "{{ assign_eip | default(true) }}"
+      register: ec2_db
+
+    - name: Launch App instances
+      local_action:
+        module: ec2
+        keypair: "{{ keypair }}"
+        instance_type: "{{ type | default('t2.micro') }}"
+        vpc_subnet_id: "subnet-{{ vpc_subnet | default('d931e1e5') }}"
+        image: "{{ ami }}"
+        region: "{{ region }}"
+        count: "{{ count }}"
+        wait: yes
+        instance_tags: "{{ tags_app }}"
+        assign_public_ip: "{{ assign_eip | default(true) }}"
+      register: ec2_app
+
+    - name: Wait for SSH to come up
+      wait_for:
+        host: "{{ item.public_dns_name }}"
+        port: 22
+        delay: 60
+        timeout: 320
+        state: started
+      with_items: 
+        - "{{ ec2_db.instances }}"
+        - "{{ ec2_app.instances }}"
+
+    - name: Instance info
+      debug:
+        msg: "{{ item.id }} {{ item.public_ip }}"
+      with_items: 
+        - "{{ ec2_db.instances }}"
+        - "{{ ec2_app.instances }}"
+
+    - name: Add DB instances to a group
+      add_host:
+        name: "{{ item.public_ip }}"
+        groups: db_provisioned
+      with_items: "{{ ec2_db.instances }}"
+    
+    - name: Add App instances to a group
+      add_host:
+        name: "{{ item.public_ip }}"
+        groups: app_provisioned
+      with_items: "{{ ec2_app.instances }}"
+   
+    - name: Set the Provider URL
+      set_fact:
+        provider_url: "{{ manageiq.api_url }}/api/providers/{{ provider_id }}"
+
+    - name: Refresh Amazon EC2 provider in CloudForms
+      uri:
+        url: "{{ provider_url }}"
+        method: POST
+        body:
+          action: refresh
+        body_format: json
+        validate_certs: False
+        headers:
+          X-Auth-Token: "{{ manageiq.api_token }}"
+          Content-Type: "application/json" 
+        status_code: 200
+      register: output
+
+    - name: Set the task href
+      set_fact:
+        task_url: "{{ output.json.task_href}}"
+
+    - name: Wait for the provider refresh to end
+      uri:
+        url: "{{ task_url }}"
+        method: GET
+        validate_certs: False
+        headers:
+          X-Auth-Token: "{{ manageiq.api_token }}"
+          Content-Type: "application/json" 
+        status_code: 200
+      register: task_result
+      until: task_result.json.state == 'Finished' or task_result.json.status == 'Error'
+      failed_when: task_result.json.status == 'Error'
+      retries: "{{max_retries}}"
+      delay: "{{retry_interval}}"
+
+    - name: Lookup instance href
+      uri:
+        url: "{{ manageiq.api_url }}/api/vms?filter[]=name={{ item.id }}&expand=resources"
+        method: GET
+        body:
+          action: refresh
+        body_format: json
+        validate_certs: False
+        headers:
+          X-Auth-Token: "{{ manageiq.api_token }}"
+          Content-Type: "application/json"
+        status_code: 200
+      register: output
+      with_items: 
+        - "{{ ec2_db.instances }}"
+        - "{{ ec2_app.instances }}"
+
+    - name: Set the Service URL
+      set_fact:
+        svc_url: "/api/{{ manageiq.service }}"
+
+    - name: Initialize an empty list for vms
+      set_fact:
+        vms: []
+
+    - name: Append resource href to vms list
+      set_fact:
+        vms: "{{ vms }} + [ { 'href': svc_url, 'resource': { 'href': '/api/vms/{{ item.json.resources[0].id }}' } } ]"
+      with_items: "{{ output.results }}"
+
+    - debug: var=vms
+
+    - name: Register vms with the service
+      uri:
+        url: "{{ manageiq.api_url }}/api/services"
+        method: POST
+        body_format: json
+        body:
+          action: add_resource
+          resources: "{{ vms }}"
+        validate_certs: False
+        headers:
+          X-Auth-Token: "{{ manageiq.api_token }}"
+          Content-Type: "application/json"
+        status_code: 200
+      register: output
+
+    - debug: var=output.json.results[0].success
+
+    - name: Check if the VM was successfully attached to service
+      fail: msg="{{output.json.results[0].message}}"
+      when: output.json.results[0].success == false
+
+- hosts: db_provisioned
+  name: Deploy PostgreSQL
+  user: ec2-user
+  become: true
+  gather_facts: true
+
+  vars:
+    postgresql_pg_hba_conf_default:
+      - { type: local, database: all, user: postgres, address: "", method: peer }
+      - { type: host, database: all, user: all, address: "127.0.0.1/32", method: md5 }
+      - { type: host, database: all, user: all, address: "::1/128", method: md5 }
+      - { type: host, database: all, user: all, address: "0.0.0.0/0", method: md5 }
+    postgresql_databases:
+      - name: ticketmonster
+    postgresql_users:
+      - name: test
+        password: test
+
+  roles:
+    - { role: sfromm.postgresql }
+
+  post_tasks:
+    - name: Configure TCP/IP Client Authorizations
+      lineinfile: dest=/var/lib/pgsql/data/postgresql.conf regexp=^listen_addresses line=listen_addresses='*'
+      become: true
+
+    - name: Restart PostgreSQL
+      service: name=postgresql state=restarted
+      become: true
+
+- hosts: app_provisioned
+  name: Deploy Ticket Monster
+  user: ec2-user
+  become: true
+  gather_facts: true
+
+  vars:
+    region:   us-east-1
+
+  pre_tasks:
+    - name: Get ext_database_name
+      set_fact:
+        ext_database_name: "{{ hostvars[item]['inventory_hostname'] }}"
+      with_items: 
+        - "{{ groups['db_provisioned'] }}"
+
+  roles:
+    - jboss
+    
+  tasks:
+    - ec2_facts:
+    - local_action:
+        module: ec2_elb
+        ec2_region: "{{ region }}"
+        instance_id: "{{ ansible_ec2_instance_id }}"
+        ec2_elbs: "ticketmonster"
+        state: present
+        wait: yes
+        wait_timeout: 60
+      become: false
+      ignore_errors: yes
+
+

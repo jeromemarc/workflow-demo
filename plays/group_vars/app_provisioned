@@ -1,0 +1,5 @@
+# Variables for app_provisioned group
+
+http_port: 8080
+https_port: 8443
+

@@ -1,0 +1,62 @@
+---
+- name: Install Java 1.7 and some basic dependencies
+  yum: name={{item}} state=present
+  with_items:
+   - unzip
+   - java-1.7.0-openjdk
+  become: true
+
+- name: Download JBoss from jboss.org
+  get_url: url=http://download.jboss.org/jbossas/7.1/jboss-as-7.1.1.Final/jboss-as-7.1.1.Final.zip dest=/opt/jboss-as-7.1.1.Final.zip
+
+- name: Extract archive
+  command: chdir=/usr/share /usr/bin/unzip -q /opt/jboss-as-7.1.1.Final.zip creates=/usr/share/jboss-as
+
+  # Rename the dir to avoid encoding the version in the init script
+- name: Rename install directory
+  command: chdir=/usr/share /bin/mv jboss-as-7.1.1.Final jboss-as creates=/usr/share/jboss-as
+
+- name: Add group "jboss"
+  group: name=jboss
+  become: true
+
+- name: Add user "jboss"
+  user: name=jboss group=jboss home=/usr/share/jboss-as
+  become: true
+
+- name: Change ownership of JBoss installation
+  file: path=/usr/share/jboss-as/ owner=jboss group=jboss state=directory recurse=yes
+
+- name: Copying standalone.xml configuration file
+  template: src=standalone.xml dest=/usr/share/jboss-as/standalone/configuration/
+
+- name: Replace EXT_DATABASE_NAME in standalone.xml
+#  replace: dest=/usr/share/jboss-as/standalone/configuration/standalone.xml  regexp='EXT_DATABASE_NAME' replace="{{ hostvars[ext_database_name]['ansible_ssh_host'] }}"  
+  replace: dest=/usr/share/jboss-as/standalone/configuration/standalone.xml  regexp='EXT_DATABASE_NAME' replace="{{ ext_database_name }}"
+
+- name: Copy the init script
+  copy: src=jboss-as-standalone.sh dest=/etc/init.d/jboss mode=0755
+  become: true
+
+- name: Install JBoss Applications
+  copy: src=ticket-monster.war dest=/usr/share/jboss-as/standalone/deployments
+
+- name: Create directory for PostgreSQL Driver
+  file: path=/usr/share/jboss-as/modules/org/postgresql/main state=directory 
+
+- name: Copy module.xml
+  copy: src=module.xml dest=/usr/share/jboss-as/modules/org/postgresql/main
+
+- name: Copy postgresql-9.4.1208.jre7.jar
+  copy: src=postgresql-9.4.1208.jre7.jar dest=/usr/share/jboss-as/modules/org/postgresql/main
+
+- name: Start JBoss
+  shell: /etc/init.d/jboss start
+  become: true
+
+#- name: Enable JBoss to be started at boot
+#  service: name=jboss state=started enabled=yes
+#  notify: restart jboss
+#  become: true
+
+- meta: flush_handlers
