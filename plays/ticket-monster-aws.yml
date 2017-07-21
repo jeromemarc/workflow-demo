@@ -17,7 +17,7 @@
       env:  "{{ tags_env  | default('prod') }}"
       type: "{{ tags_type | default('app') }}"
     wait_for_ssh: False
-    provider_id: 10000000000004
+    provider_id: "{{ provider_id }}"
     max_retries: 9 
     retry_interval: 20
 
