@@ -1,0 +1,33 @@
+- name: Create new VMware VM
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    wait_for_ssh: False
+
+  tasks:
+    - name: Create VM
+      vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        name: "{{ vm_name }}"
+        template: "{{ vcenter_template }}"
+        datacenter: "{{ vcenter_datacenter }}"
+        folder: "{{ vcenter_folder }}"
+        wait_for_ip_address: yes
+      register: newvm
+
+    - name: VM info
+      debug:
+        msg: "{{ newvm.instance.ipv4 }} {{ vm_name }}"
+
+    - name: Wait for SSH to come up
+      wait_for:
+        host: "{{ newvm.instance.ipv4 }}"
+        port: 22
+        delay: 60
+        timeout: 320
+        state: started
+      with_items: "{{ newvm }}"
