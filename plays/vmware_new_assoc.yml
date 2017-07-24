@@ -1,0 +1,126 @@
+- name: Create new VMware VM
+  hosts: localhost
+  gather_facts: false
+  connection: local
+
+  vars:
+    wait_for_ssh: False
+    provider_id: "{{ provider_id }}"
+    max_retries: 9
+    retry_interval: 20
+
+  tasks:
+    - name: Create VM
+      vmware_guest:
+        hostname: "{{ vcenter_hostname }}"
+        username: "{{ vcenter_username }}"
+        password: "{{ vcenter_password }}"
+        name: "{{ vm_name }}"
+        template: "{{ vcenter_template }}"
+        datacenter: "{{ vcenter_datacenter }}"
+        folder: "{{ vcenter_folder }}"
+        wait_for_ip_address: yes
+      register: newvm
+
+    - name: VM info
+      debug:
+        msg: "{{ newvm.instance.ipv4 }} {{ vm_name }}"
+
+#    - name: Wait for SSH to come up
+#      wait_for:
+#        host: "{{ newvm.instance.ipv4 }}"
+#        port: 22
+#        delay: 60
+#        timeout: 320
+#        state: started
+#      with_items: "{{ newvm }}"
+
+    - name: Set the Provider URL
+      set_fact:
+        provider_url: "{{ manageiq.api_url }}/api/providers/{{ provider_id }}"
+
+    - name: Refresh VMware provider in CloudForms
+      uri:
+        url: "{{ provider_url }}"
+        method: POST
+        body:
+          action: refresh
+        body_format: json
+        validate_certs: False
+        headers:
+          X-Auth-Token: "{{ manageiq.api_token }}"
+          Content-Type: "application/json"
+        status_code: 200
+      register: output
+
+    - name: Set the task href
+      set_fact:
+        task_url: "{{ output.json.task_href}}"
+
+    - name: Wait for the provider refresh to end
+      uri:
+        url: "{{ task_url }}"
+        method: GET
+        validate_certs: False
+        headers:
+          X-Auth-Token: "{{ manageiq.api_token }}"
+          Content-Type: "application/json"
+        status_code: 200
+      register: task_result
+      until: task_result.json.state == 'Finished' or task_result.json.status == 'Error'
+      failed_when: task_result.json.status == 'Error'
+      retries: "{{max_retries}}"
+      delay: "{{retry_interval}}"
+
+#    - debug: var=newvm
+
+    - name: Lookup instances href
+      uri:
+        url: "{{ manageiq.api_url }}/api/vms?filter[]=name={{ item.hw_name }}&expand=resources"
+        method: GET
+        body:
+          action: refresh
+        body_format: json
+        validate_certs: False
+        headers:
+          X-Auth-Token: "{{ manageiq.api_token }}"
+          Content-Type: "application/json"
+        status_code: 200
+      register: output
+      with_items: "{{ newvm.instance }}"
+
+    - name: Set the Service URL
+      set_fact:
+        svc_url: "/api/{{ manageiq.service }}"
+
+    - name: Initialize an empty list for vms
+      set_fact:
+        vms: []
+
+    - name: Append resource href to vms list
+      set_fact:
+        vms: "{{ vms }} + [ { 'href': svc_url, 'resource': { 'href': '/api/vms/{{ item.json.resources[0].id }}' } } ]"
+      with_items: "{{ output.results }}"
+
+    - debug: var=vms
+    
+    - name: Register vms with the service
+      uri:
+        url: "{{ manageiq.api_url }}/api/services"
+        method: POST
+        body_format: json
+        body:
+          action: add_resource
+          resources: "{{ vms }}"
+        validate_certs: False
+        headers:
+          X-Auth-Token: "{{ manageiq.api_token }}"
+          Content-Type: "application/json"
+        status_code: 200
+      register: output
+
+    - debug: var=output.json.results[0].success
+
+    - name: Check if the VM was successfully attached to service
+      fail: msg="{{output.json.results[0].message}}"
+      when: output.json.results[0].success == false
