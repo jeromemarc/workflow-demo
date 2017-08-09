@@ -9,7 +9,7 @@
     ami:      ami-81cf0c97 
     keypair:  "{{ ec2_keypair_name | default('you need to define this') }}"
     set_dns:  False
-    count:    "{% if instance_count -%}{{ instance_count | int }}{% else %}1{%- endif %}"
+    count:    "{% if instance_count is defined -%}{{ instance_count | int }}{% else %}1{%- endif %}"
     tags:
       env:  "{{ tags_env  | default('prod') }}"
       type: "{{ tags_type | default('app') }}"
