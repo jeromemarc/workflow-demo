@@ -9,7 +9,7 @@
     ami:      ami-81cf0c97 
     keypair:  "{{ ec2_keypair_name | default('you need to define this') }}"
     set_dns:  False
-    count:    "{{ count | int }}"
+    count:    {% if count -%}{{ count | int }}{% else %}1{%- endif %}
     tags:
       env:  "{{ tags_env  | default('prod') }}"
       type: "{{ tags_type | default('app') }}"
@@ -27,7 +27,7 @@
         vpc_subnet_id: "subnet-{{ vpc_subnet | default('d931e1e5') }}"
         image: "{{ ami }}"
         region: "{{ region }}"
-        count: "{{ count | default(1) }}"
+        count: "{{ count }}"
         wait: yes
         instance_tags: "{{ tags }}"
 #        user_data: "{{ lookup('file', '../scripts/ec2_bootstrap.sh') }}"
