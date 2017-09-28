@@ -20,6 +20,8 @@
     provider_id: "{{ provider_id }}"
     max_retries: 9 
     retry_interval: 20
+    miq_username: "{{ miq_username }}"
+    miq_password: "{{ miq_password }}"
 
   tasks:
     - name: Launch DB instance
@@ -88,12 +90,14 @@
       uri:
         url: "{{ provider_url }}"
         method: POST
+        user: "{{ miq_username }}"
+        password: "{{ miq_password }}"
         body:
           action: refresh
         body_format: json
         validate_certs: False
         headers:
-          X-Auth-Token: "{{ manageiq.api_token }}"
+          #X-Auth-Token: "{{ manageiq.api_token }}"
           Content-Type: "application/json" 
         status_code: 200
       register: output
@@ -106,9 +110,11 @@
       uri:
         url: "{{ task_url }}"
         method: GET
+        user: "{{ miq_username }}"
+        password: "{{ miq_password }}"
         validate_certs: False
         headers:
-          X-Auth-Token: "{{ manageiq.api_token }}"
+          #X-Auth-Token: "{{ manageiq.api_token }}"
           Content-Type: "application/json" 
         status_code: 200
       register: task_result
@@ -121,12 +127,14 @@
       uri:
         url: "{{ manageiq.api_url }}/api/vms?filter[]=name={{ item.id }}&expand=resources"
         method: GET
+        user: "{{ miq_username }}"
+        password: "{{ miq_password }}"
         body:
           action: refresh
         body_format: json
         validate_certs: False
         headers:
-          X-Auth-Token: "{{ manageiq.api_token }}"
+          #X-Auth-Token: "{{ manageiq.api_token }}"
           Content-Type: "application/json"
         status_code: 200
       register: output
@@ -153,13 +161,15 @@
       uri:
         url: "{{ manageiq.api_url }}/api/services"
         method: POST
+        user: "{{ miq_username }}"
+        password: "{{ miq_password }}"
         body_format: json
         body:
           action: add_resource
           resources: "{{ vms }}"
         validate_certs: False
         headers:
-          X-Auth-Token: "{{ manageiq.api_token }}"
+          #X-Auth-Token: "{{ manageiq.api_token }}"
           Content-Type: "application/json"
         status_code: 200
       register: output
